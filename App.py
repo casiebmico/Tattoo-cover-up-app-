@@ -1,73 +1,80 @@
 import streamlit as st
-from PIL import Image, ImageEnhance, ImageOps
+from PIL import Image, ImageEnhance
 import io
+import replicate  # New for AI generation
+import requests
 
 st.set_page_config(page_title="Tattoo Cover-Up Designer", layout="wide")
 st.title("🖤 Tattoo Cover-Up Designer")
-st.write("Upload an old tattoo • Design or generate a new one • Create realistic cover-up preview")
+st.write("Upload old tattoo • Generate or upload new design • Preview cover-up")
 
-# Sidebar
-st.sidebar.header("Tools & Examples")
-st.sidebar.write("**Tip:** Use transparent PNGs for best results.")
+# Sidebar for API key
+with st.sidebar:
+    st.header("Settings")
+    replicate_api = st.text_input("Replicate API Key", type="password", help="Get it from replicate.com")
+    if replicate_api:
+        replicate.Client(api_token=replicate_api)
 
-# Upload old tattoo
-old_file = st.file_uploader("1. Upload Photo of Old Tattoo", type=["jpg", "jpeg", "png"], help="Clear photo with good lighting")
+# Main app
+old_file = st.file_uploader("1. Upload Photo of Old Tattoo", type=["jpg", "jpeg", "png"])
 
-# New design options
 st.subheader("2. New Tattoo Design")
-tab1, tab2 = st.tabs(["Upload Your Design", "Generate Idea (Coming Soon)"])
+tab1, tab2 = st.tabs(["Upload Your Design", "✨ Generate AI Tattoo Idea"])
 
 with tab1:
-    new_file = st.file_uploader("Upload New Tattoo Design (transparent PNG recommended)", type=["jpg", "jpeg", "png"])
+    new_file = st.file_uploader("Upload New Tattoo Design", type=["jpg", "jpeg", "png"])
 
-# Controls
-if old_file and new_file:
-    col1, col2 = st.columns([1, 1])
+with tab2:
+    st.write("Describe the tattoo you want to generate")
+    prompt = st.text_area("AI Prompt", 
+        value="realistic black and grey tattoo of a phoenix rising, highly detailed, covers upper arm",
+        height=100)
     
-    with col1:
-        st.image(old_file, caption="Old Tattoo", use_column_width=True)
-        old_img = Image.open(old_file).convert("RGBA")
+    col_a, col_b = st.columns(2)
+    with col_a:
+        style = st.selectbox("Style", ["Blackwork", "Realistic", "Watercolor", "Japanese Traditional", "Neo Traditional", "Minimalist Linework", "Geometric"])
+    with col_b:
+        num_images = st.slider("Number of ideas", 1, 4, 2)
     
-    with col2:
-        new_img = Image.open(new_file).convert("RGBA")
-        st.image(new_img, caption="Your New Design", use_column_width=True)
-        
-        # Editing controls
-        scale = st.slider("Size (%)", 20, 250, 100, step=5)
-        rotation = st.slider("Rotation (degrees)", -180, 180, 0, step=1)
-        opacity = st.slider("Opacity", 0.4, 1.0, 0.85, step=0.05)
-        brightness = st.slider("Brightness", 0.5, 1.5, 1.0, step=0.05)
-        contrast = st.slider("Contrast", 0.5, 1.5, 1.1, step=0.05)
-        
-        # Process image
-        new_size = (int(new_img.width * scale/100), int(new_img.height * scale/100))
-        processed = new_img.resize(new_size, Image.Resampling.LANCZOS)
-        processed = processed.rotate(rotation, expand=True, resample=Image.Resampling.BICUBIC)
-        
-        # Apply adjustments
-        processed = ImageEnhance.Brightness(processed).enhance(brightness)
-        processed = ImageEnhance.Contrast(processed).enhance(contrast)
-        
-        # Create result
-        result = old_img.copy()
-        # Simple center paste for now
-        x = (result.width - processed.width) // 2
-        y = (result.height - processed.height) // 2
-        result.paste(processed, (x, y), processed if processed.mode == 'RGBA' else None)
-        
-        st.image(result, caption="Cover-Up Preview", use_column_width=True)
-        
-        # Download
-        buf = io.BytesIO()
-        result.save(buf, format="PNG")
-        st.download_button(
-            label="💾 Download Preview Image",
-            data=buf.getvalue(),
-            file_name="tattoo_coverup_preview.png",
-            mime="image/png"
-        )
+    if st.button("🚀 Generate Tattoo Ideas"):
+        if not replicate_api:
+            st.error("Please enter your Replicate API key in the sidebar")
+        else:
+            with st.spinner("Generating beautiful tattoo ideas..."):
+                try:
+                    # Good tattoo prompt template
+                    full_prompt = f"{prompt}, {style.lower()} tattoo style, professional tattoo design, clean lines, high detail, suitable for skin, tattoo flash style"
+                    
+                    output = replicate.run(
+                        "black-forest-labs/flux-schnell",  # Fast & great quality
+                        input={
+                            "prompt": full_prompt,
+                            "num_outputs": num_images,
+                            "aspect_ratio": "3:4",   # Portrait good for tattoos
+                        }
+                    )
+                    
+                    st.success("Here are your generated tattoo ideas!")
+                    for i, img_url in enumerate(output):
+                        st.image(img_url, caption=f"AI Idea {i+1} - {style}")
+                        # Option to download
+                        response = requests.get(img_url)
+                        st.download_button(
+                            f"Download Idea {i+1}",
+                            response.content,
+                            f"tattoo_idea_{i+1}.png",
+                            "image/png",
+                            key=f"dl_{i}"
+                        )
+                except Exception as e:
+                    st.error(f"Error: {str(e)}")
 
-else:
-    st.info("👆 Upload both images to start designing")
+# === Preview Section ===
+if old_file:
+    old_img = Image.open(old_file).convert("RGBA")
+    st.image(old_img, caption="Old Tattoo", use_column_width=True)
+    
+    # Use uploaded or let user pick generated one later
+    st.info("For now, use the Upload tab or download a generated image and upload it back to combine.")
 
-st.caption("Made with ❤️ for tattoo lovers | Improve this app by telling me what features you want next")
+st.caption("💡 Tip: Generate an idea → Download it → Upload it in the first tab to preview the cover-up")
